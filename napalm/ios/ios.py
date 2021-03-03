@@ -862,6 +862,93 @@ class IOSDriver(NetworkDriver):
             optics_detail[port] = port_detail
 
         return optics_detail
+    
+    def get_layer2_neighbors(self, proto="lldp"):        
+        """By defaulting to LLDP we are preserving any existing scripts."""       
+        
+        if(proto=="both"):
+            layer2 = {}
+            lldp_neighbors = self.get_lldp_neighbors()
+            layer2["lldp"]=lldp_neighbors
+            cdp_neighbors = self._get_cdp_neighbors()
+            layer2["cdp"]=cdp_neighbors
+            return layer2
+        if(proto=="cdp"):
+            return self._get_cdp_neighbors()
+        if(proto=="lldp"):
+            return self.get_lldp_neighbors()
+        
+    def get_layer2_neighbors_detail(self, proto="lldp"):        
+        """By defaulting to LLDP we are preserving any existing scripts."""        
+        
+        if(proto=="both"):
+            layer2 = {}
+            lldp_neighbors = self.get_lldp_neighbors_detail()
+            layer2["lldp"]=lldp_neighbors
+            cdp_neighbors = self._get_cdp_neighbors_detail()
+            layer2["cdp"]=cdp_neighbors
+            return layer2
+        if(proto=="cdp"):
+            return self._get_cdp_neighbors_detail()
+        if(proto=="lldp"):
+            return self.get_lldp_neighbors_detail()
+        
+    def _get_cdp_neighbors(self):
+        """IOS implementation of get_cdp_neighbors."""
+        cdp = {}
+        neighbors_detail = self._get_cdp_neighbors_detail()
+        for intf_name, entries in neighbors_detail.items():
+            cdp[intf_name] = []
+            for cdp_entry in entries:
+                cdp_dict = {
+                    'port': cdp_entry["remote_port"],
+                    'hostname': cdp_entry["remote_chassis_id"],
+                }
+                cdp[intf_name].append(cdp_dict)
+
+        return cdp
+
+    def _get_cdp_neighbors_detail(self):
+        """IOS implementation of get_cdp_neighbors_detail."""
+        cdp = {}
+        cdp_interfaces = []
+        command = 'show cdp neighbors detail'
+
+        cdp_entries = self._send_command(command)
+        # Check if router supports the command
+        if '% Invalid input' in cdp_entries:
+            raise ValueError("Command not supported by network device")
+        cdp_entries = textfsm_extractor(
+            self, "show_cdp_neighbors_detail", cdp_entries
+        )
+        
+        if len(cdp_entries) == 0:
+            return {}
+        
+        for idx, cdp_entry in enumerate(cdp_entries):
+            new_cdp_entry = []
+            local_intf = cdp_entry.pop("local_port")
+            
+            # Convert capabilities from CDP output to match lldp
+            system_capabilities = cdp_entry["capabilities"].split()
+            transformed_system_capabilities = []
+            for capability in system_capabilities:
+                transformed_system_capabilities.append(capability.lower())
+                
+            # Build object based on existing lldp layer2
+            new_cdp_entry = {"remote_chassis_id": cdp_entry["destination_host"],
+                             "remote_port": cdp_entry["remote_port"],
+                             "remote_system_name": cdp_entry["destination_host"],
+                             "remote_system_description": cdp_entry["software_version"],
+                             "remote_system_capab":  transformed_system_capabilities,
+                             "remote_system_enable_capab": transformed_system_capabilities,
+                             "parent_interface": '',
+                             }
+            
+            cdp.setdefault(local_intf, [])
+            cdp[local_intf].append(new_cdp_entry)
+        return cdp
+
 
     def get_lldp_neighbors(self):
         """IOS implementation of get_lldp_neighbors."""
